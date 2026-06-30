@@ -1,0 +1,1330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>VRReader — Immersive E-Book Reader</title>
+<meta name="description" content="A free, immersive EPUB & PDF reader built for the Meta Quest browser. No login, no install, fully customizable." />
+<meta name="theme-color" content="#15171a" />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" href="icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="icon-192.png" />
+
+<!-- Reading fonts (loaded async; graceful fallback to system fonts) -->
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet"
+  href="https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&family=Literata:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;700&display=swap" />
+
+<style>
+  /* ===================================================================
+     THEME + DESIGN TOKENS  — every colour / size lives here as a CSS var.
+     Switching theme === swapping these values (see body[data-theme]).
+     =================================================================== */
+  :root {
+    /* Accent (single warm amber, shared across all themes) */
+    --accent: #d9a05b;
+    --accent-soft: rgba(217, 160, 91, 0.18);
+
+    /* Reading typography (driven live by the settings panel) */
+    --reader-font: 'Lora', Georgia, 'Times New Roman', serif;
+    --reader-size: 20px;
+    --reader-line: 1.6;
+    --reader-pad: 8%;        /* horizontal padding of the text block */
+    --reader-align: left;
+
+    /* UI metrics */
+    --tap: 44px;             /* minimum touch target */
+    --tap-lg: 56px;          /* toolbar buttons (laser-pointer forgiving) */
+    --radius: 14px;
+    --ui-font: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+
+    /* Theme surfaces (overridden per theme below) */
+    --bg: #15171a;
+    --text: #cdd2d8;
+    --muted: #7c8591;
+    --panel-bg: #1e2227;
+    --panel-text: #e6eaef;
+    --panel-border: rgba(255, 255, 255, 0.08);
+    --overlay: rgba(20, 22, 26, 0.82);
+    --control-bg: rgba(255, 255, 255, 0.06);
+    --control-active: var(--accent);
+    --pdf-filter: none;      /* PDF canvas filter (inverted in dark themes) */
+    --scrim: rgba(0, 0, 0, 0.45);
+  }
+
+  body[data-theme="light"] {
+    --bg: #ffffff;        --text: #1a1a1a;        --muted: #6b7280;
+    --panel-bg: #f5f5f4;  --panel-text: #1a1a1a;  --panel-border: rgba(0,0,0,0.10);
+    --overlay: rgba(250, 250, 249, 0.86);
+    --control-bg: rgba(0, 0, 0, 0.05);
+    --pdf-filter: none;   --scrim: rgba(0, 0, 0, 0.35);
+  }
+  body[data-theme="sepia"] {
+    --bg: #f4ecd8;        --text: #5b4636;        --muted: #9c8266;
+    --panel-bg: #ece2c9;  --panel-text: #5b4636;  --panel-border: rgba(91,70,54,0.18);
+    --overlay: rgba(244, 236, 216, 0.88);
+    --control-bg: rgba(91, 70, 54, 0.08);
+    --pdf-filter: sepia(0.35);  --scrim: rgba(91, 70, 54, 0.30);
+  }
+  body[data-theme="dark"] {
+    --bg: #15171a;        --text: #cdd2d8;        --muted: #7c8591;
+    --panel-bg: #1e2227;  --panel-text: #e6eaef;  --panel-border: rgba(255,255,255,0.08);
+    --overlay: rgba(20, 22, 26, 0.82);
+    --control-bg: rgba(255, 255, 255, 0.06);
+    --pdf-filter: invert(0.92) hue-rotate(180deg);  --scrim: rgba(0,0,0,0.5);
+  }
+  body[data-theme="amoled"] {
+    --bg: #000000;        --text: #d8d8d2;        --muted: #6b6b6b;
+    --panel-bg: #0c0c0c;  --panel-text: #ececec;  --panel-border: rgba(255,255,255,0.10);
+    --overlay: rgba(0, 0, 0, 0.86);
+    --control-bg: rgba(255, 255, 255, 0.07);
+    --pdf-filter: invert(1) hue-rotate(180deg);  --scrim: rgba(0,0,0,0.6);
+  }
+  body[data-theme="custom"] {
+    --bg: var(--custom-bg, #101418);
+    --text: var(--custom-text, #e8e8e8);
+    --muted: var(--custom-text, #e8e8e8);
+    --panel-bg: #1b1f24; --panel-text: #e8e8e8; --panel-border: rgba(255,255,255,0.10);
+    --overlay: rgba(16, 20, 24, 0.85);
+    --control-bg: rgba(255, 255, 255, 0.07);
+    --pdf-filter: none;  --scrim: rgba(0,0,0,0.5);
+  }
+
+  @font-face {
+    font-family: 'OpenDyslexic';
+    src: url('https://cdn.jsdelivr.net/npm/@fontsource/opendyslexic@5.0.4/files/opendyslexic-latin-400-normal.woff2') format('woff2');
+    font-weight: 400; font-display: swap;
+  }
+
+  /* ===================================================================
+     BASE
+     =================================================================== */
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; width: 100%;
+    overflow: hidden; background: var(--bg); color: var(--text);
+    font-family: var(--ui-font);
+    transition: background-color 0.25s ease, color 0.25s ease;
+    overscroll-behavior: none;
+  }
+  #app { position: fixed; inset: 0; }
+
+  button { font-family: inherit; cursor: pointer; }
+  button:focus-visible, [tabindex]:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+
+  /* ===================================================================
+     WELCOME SCREEN
+     =================================================================== */
+  #welcome {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 28px;
+    padding: 32px; text-align: center; background: var(--bg);
+  }
+  #welcome .brand { display: flex; align-items: center; gap: 16px; }
+  #welcome .brand svg { width: 56px; height: 56px; flex: none; }
+  #welcome h1 { font-size: clamp(28px, 5vw, 44px); margin: 0; letter-spacing: -0.02em; font-weight: 600; }
+  #welcome .tag { color: var(--muted); font-size: clamp(14px, 2.5vw, 18px); max-width: 46ch; margin: -10px 0 0; line-height: 1.5; }
+
+  .dropzone {
+    width: min(560px, 88vw); min-height: 220px; border: 2px dashed var(--panel-border);
+    border-radius: var(--radius); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; padding: 32px;
+    background: var(--control-bg); transition: border-color 0.2s, background 0.2s, transform 0.15s;
+  }
+  .dropzone.drag { border-color: var(--accent); background: var(--accent-soft); transform: scale(1.01); }
+  .dropzone .big { font-size: 19px; font-weight: 600; }
+  .dropzone .formats { color: var(--muted); font-size: 14px; }
+  .pick-btn {
+    min-height: var(--tap-lg); padding: 0 28px; border: none; border-radius: 999px;
+    background: var(--accent); color: #1a1206; font-weight: 700; font-size: 17px;
+    display: inline-flex; align-items: center; gap: 10px;
+  }
+  .pick-btn:hover { filter: brightness(1.06); }
+  #welcome .hint { color: var(--muted); font-size: 13px; max-width: 50ch; line-height: 1.5; }
+
+  /* ===================================================================
+     READING VIEW
+     =================================================================== */
+  #reader { position: absolute; inset: 0; display: none; background: var(--bg); }
+  body.has-book #welcome { display: none; }
+  body.has-book #reader { display: block; }
+
+  /* Horizontal padding here = reading margins. epub.js measures the inner
+     stage, so the column width stays correct (no next-column bleed). */
+  #epub-area { position: absolute; inset: 0; padding: 22px var(--reader-pad); }
+  #epub-stage { width: 100%; height: 100%; }
+  #pdf-area {
+    position: absolute; inset: 0; display: none; overflow: hidden;
+    align-items: center; justify-content: center;
+  }
+  #pdf-area canvas {
+    display: block; max-width: 100%; max-height: 100%;
+    box-shadow: 0 0 0 1px var(--panel-border); filter: var(--pdf-filter);
+    transition: filter 0.25s ease;
+  }
+
+  /* Invisible navigation zones (over the reader) */
+  #nav-zones { position: absolute; inset: 0; display: grid;
+    grid-template-columns: 22% 1fr 22%; grid-template-rows: 100%; z-index: 20; }
+  #nav-zones > div { -webkit-user-select: none; user-select: none; }
+  #zone-prev, #zone-next { cursor: pointer; }
+
+  /* ===================================================================
+     TOOLBAR (auto-hiding top overlay)
+     =================================================================== */
+  #toolbar {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 60;
+    display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+    background: var(--overlay); backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--panel-border);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+  }
+  #toolbar.hidden { opacity: 0; transform: translateY(-100%); pointer-events: none; }
+  .tb-btn {
+    min-width: var(--tap-lg); min-height: var(--tap-lg);
+    display: inline-flex; align-items: center; justify-content: center;
+    border: none; border-radius: 12px; background: var(--control-bg);
+    color: var(--panel-text); position: relative;
+  }
+  .tb-btn:hover { background: var(--accent-soft); color: var(--accent); }
+  .tb-btn svg { width: 24px; height: 24px; }
+  .tb-btn[aria-pressed="true"] { background: var(--accent); color: #1a1206; }
+  .tb-spacer { flex: 1; }
+  #book-title {
+    font-size: 14px; color: var(--panel-text); font-weight: 600;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 34vw; padding: 0 6px;
+  }
+  #progress-pill {
+    font-size: 13px; color: var(--panel-text); background: var(--control-bg);
+    border-radius: 999px; padding: 8px 14px; min-height: var(--tap);
+    display: inline-flex; align-items: center; white-space: nowrap;
+  }
+  #progress-pill b { color: var(--accent); font-weight: 700; }
+
+  /* tooltip label */
+  .tb-btn[data-label]:hover::after {
+    content: attr(data-label); position: absolute; top: calc(100% + 6px); left: 50%;
+    transform: translateX(-50%); background: var(--panel-bg); color: var(--panel-text);
+    font-size: 12px; padding: 4px 8px; border-radius: 6px; white-space: nowrap;
+    border: 1px solid var(--panel-border); pointer-events: none; z-index: 70;
+  }
+
+  /* Thin chapter progress bar under toolbar */
+  #progress-bar { position: absolute; top: 0; left: 0; height: 3px; width: 0%;
+    background: var(--accent); z-index: 65; transition: width 0.3s ease; }
+  #toolbar.hidden ~ #progress-bar { opacity: 0; }
+
+  /* ===================================================================
+     DRAWERS (settings + ToC)
+     =================================================================== */
+  .drawer {
+    position: absolute; top: 0; bottom: 0; z-index: 80; width: min(360px, 86vw);
+    background: var(--panel-bg); color: var(--panel-text);
+    display: flex; flex-direction: column; transition: transform 0.25s ease;
+    box-shadow: 0 0 40px rgba(0,0,0,0.4);
+  }
+  #settings { right: 0; transform: translateX(105%); border-left: 1px solid var(--panel-border); }
+  #toc { left: 0; transform: translateX(-105%); border-right: 1px solid var(--panel-border); }
+  #settings.open, #toc.open { transform: translateX(0); }
+  .drawer header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 18px; border-bottom: 1px solid var(--panel-border); flex: none;
+  }
+  .drawer header h2 { margin: 0; font-size: 17px; font-weight: 600; }
+  .drawer .body { overflow-y: auto; padding: 18px; display: flex; flex-direction: column; gap: 22px; }
+  .icon-btn {
+    min-width: var(--tap); min-height: var(--tap); border: none; border-radius: 10px;
+    background: var(--control-bg); color: var(--panel-text);
+    display: inline-flex; align-items: center; justify-content: center;
+  }
+  .icon-btn:hover { background: var(--accent-soft); color: var(--accent); }
+  .icon-btn svg { width: 22px; height: 22px; }
+
+  /* Scrim behind drawers */
+  #scrim { position: absolute; inset: 0; background: var(--scrim); z-index: 75;
+    opacity: 0; pointer-events: none; transition: opacity 0.25s ease; }
+  #scrim.show { opacity: 1; pointer-events: auto; }
+
+  /* Settings controls */
+  .field { display: flex; flex-direction: column; gap: 10px; }
+  .field > label.title { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); font-weight: 600; }
+  .row-val { display: flex; justify-content: space-between; align-items: baseline; }
+  .row-val .val { color: var(--accent); font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  select, input[type="range"] { width: 100%; }
+  select {
+    min-height: var(--tap); border-radius: 10px; padding: 0 12px;
+    background: var(--control-bg); color: var(--panel-text);
+    border: 1px solid var(--panel-border); font-size: 15px;
+  }
+  input[type="range"] {
+    -webkit-appearance: none; appearance: none; height: var(--tap);
+    background: transparent; cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-runnable-track {
+    height: 6px; border-radius: 3px; background: var(--control-bg);
+  }
+  input[type="range"]::-moz-range-track { height: 6px; border-radius: 3px; background: var(--control-bg); }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 26px; height: 26px; margin-top: -10px;
+    border-radius: 50%; background: var(--accent); border: 3px solid var(--panel-bg);
+  }
+  input[type="range"]::-moz-range-thumb {
+    width: 26px; height: 26px; border-radius: 50%; background: var(--accent); border: 3px solid var(--panel-bg);
+  }
+
+  .seg { display: flex; gap: 8px; }
+  .seg button, .chip {
+    flex: 1; min-height: var(--tap); border-radius: 10px; border: 1px solid var(--panel-border);
+    background: var(--control-bg); color: var(--panel-text); font-size: 14px; font-weight: 600;
+  }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: #1a1206; border-color: var(--accent); }
+
+  .theme-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .theme-swatch {
+    min-height: 64px; border-radius: 12px; border: 2px solid transparent;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 6px; font-size: 12px; font-weight: 600; overflow: hidden; position: relative;
+  }
+  .theme-swatch .dot { width: 20px; height: 20px; border-radius: 50%; border: 1px solid rgba(128,128,128,0.4); }
+  .theme-swatch[aria-pressed="true"] { border-color: var(--accent); }
+  .custom-colors { display: none; gap: 12px; }
+  .custom-colors.show { display: flex; }
+  .custom-colors label { flex: 1; display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
+  input[type="color"] { width: 100%; height: var(--tap); border: 1px solid var(--panel-border);
+    border-radius: 10px; background: var(--control-bg); cursor: pointer; }
+
+  /* ToC list */
+  #toc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  #toc-list a {
+    display: block; padding: 12px 10px; min-height: var(--tap); border-radius: 8px;
+    color: var(--panel-text); text-decoration: none; font-size: 15px; line-height: 1.35;
+  }
+  #toc-list a:hover { background: var(--accent-soft); color: var(--accent); }
+  #toc-list a.sub { padding-left: 26px; font-size: 14px; color: var(--muted); }
+  .toc-section-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); font-weight: 700; margin: 14px 2px 4px; }
+  #bookmark-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  #bookmark-list li { display: flex; align-items: center; gap: 8px; }
+  #bookmark-list button.go { flex: 1; text-align: left; min-height: var(--tap); border-radius: 8px;
+    border: 1px solid var(--panel-border); background: var(--control-bg); color: var(--panel-text);
+    padding: 8px 10px; font-size: 14px; }
+  #bookmark-list button.go:hover { background: var(--accent-soft); color: var(--accent); }
+  #bookmark-list .empty { color: var(--muted); font-size: 14px; }
+
+  /* ===================================================================
+     ERROR / TOAST
+     =================================================================== */
+  #error {
+    position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px);
+    z-index: 90; max-width: min(560px, 90vw); background: var(--panel-bg); color: var(--panel-text);
+    border: 1px solid var(--panel-border); border-left: 4px solid #e0584f;
+    border-radius: 12px; padding: 16px 18px; box-shadow: 0 10px 40px rgba(0,0,0,0.45);
+    opacity: 0; pointer-events: none; transition: opacity 0.25s ease, transform 0.25s ease;
+  }
+  #error.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+  #error .title { font-weight: 700; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  #error .msg { font-size: 14px; color: var(--muted); line-height: 1.5; }
+  #error button.close { position: absolute; top: 8px; right: 8px; min-width: var(--tap); min-height: var(--tap);
+    background: none; border: none; color: var(--muted); font-size: 20px; }
+
+  /* Loading spinner */
+  #loading { position: absolute; inset: 0; z-index: 85; display: none; align-items: center;
+    justify-content: center; flex-direction: column; gap: 18px; background: var(--bg); }
+  #loading.show { display: flex; }
+  .spinner { width: 46px; height: 46px; border-radius: 50%;
+    border: 4px solid var(--control-bg); border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
+  #loading .label { color: var(--muted); font-size: 15px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Focus mode: hide all chrome */
+  body.focus #toolbar, body.focus #progress-bar { opacity: 0; pointer-events: none; transform: translateY(-100%); }
+
+  .visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body data-theme="dark">
+<div id="app">
+
+  <!-- ============ WELCOME ============ -->
+  <section id="welcome">
+    <div class="brand">
+      <svg viewBox="0 0 64 64" fill="none" aria-hidden="true">
+        <rect x="4" y="10" width="56" height="44" rx="6" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="2.5"/>
+        <path d="M32 16c-5-3-11-3-15-1v30c4-2 10-2 15 1 5-3 11-3 15-1V15c-4-2-10-2-15 1z" fill="var(--bg)" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round"/>
+        <path d="M32 16v31" stroke="var(--accent)" stroke-width="2"/>
+      </svg>
+      <h1>VRReader</h1>
+    </div>
+    <p class="tag">An immersive e-book reader built for the Meta&nbsp;Quest browser. Open a book and read edge-to-edge — no login, no install, nothing leaves your headset.</p>
+
+    <label class="dropzone" id="dropzone" for="file-input">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 5 17 10"/><line x1="12" y1="5" x2="12" y2="16"/>
+      </svg>
+      <span class="big">Drop an EPUB or PDF here</span>
+      <span class="formats">or</span>
+      <span class="pick-btn" role="button">Choose a file</span>
+      <span class="formats">Supported: .epub &nbsp;·&nbsp; .pdf</span>
+    </label>
+    <input id="file-input" type="file" accept=".epub,.pdf,application/epub+zip,application/pdf" class="visually-hidden" />
+
+    <p class="hint">Your files are read locally in the browser and never uploaded. MOBI/AZW3 isn't supported yet — convert to EPUB with <b>Calibre</b> first.</p>
+  </section>
+
+  <!-- ============ READER ============ -->
+  <section id="reader" aria-label="Reading area">
+    <div id="epub-area"></div>
+    <div id="pdf-area"><canvas id="pdf-canvas"></canvas></div>
+
+    <div id="nav-zones" aria-hidden="true">
+      <div id="zone-prev" title="Previous page"></div>
+      <div id="zone-center"></div>
+      <div id="zone-next" title="Next page"></div>
+    </div>
+  </section>
+
+  <div id="progress-bar"></div>
+
+  <!-- ============ TOOLBAR ============ -->
+  <div id="toolbar" class="hidden" role="toolbar" aria-label="Reader controls">
+    <button class="tb-btn" id="btn-open" data-label="Open file" aria-label="Open file">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+    </button>
+    <button class="tb-btn" id="btn-toc" data-label="Contents" aria-label="Table of contents">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+    </button>
+    <span id="book-title"></span>
+    <span class="tb-spacer"></span>
+    <span id="progress-pill" title="Reading progress"><b id="progress-text">—</b></span>
+    <button class="tb-btn" id="btn-theme" data-label="Light / dark" aria-label="Toggle light or dark background">
+      <svg id="icon-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      <svg id="icon-sun" style="display:none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+    </button>
+    <button class="tb-btn" id="btn-bookmark" data-label="Bookmark" aria-label="Add bookmark">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg>
+    </button>
+    <button class="tb-btn" id="btn-fullscreen" data-label="Fullscreen" aria-label="Toggle fullscreen" aria-pressed="false">
+      <svg id="icon-fs-enter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3M3 16v3a2 2 0 0 0 2 2h3m13-5v3a2 2 0 0 1-2 2h-3"/></svg>
+      <svg id="icon-fs-exit" style="display:none" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 3v3a2 2 0 0 1-2 2H3m18 0h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3m13-5h-3a2 2 0 0 0-2 2v3"/></svg>
+    </button>
+    <button class="tb-btn" id="btn-settings" data-label="Display settings" aria-label="Display settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </div>
+
+  <!-- ============ SCRIM ============ -->
+  <div id="scrim"></div>
+
+  <!-- ============ ToC DRAWER ============ -->
+  <aside id="toc" class="drawer" aria-label="Table of contents" aria-hidden="true">
+    <header>
+      <h2>Contents</h2>
+      <button class="icon-btn" id="toc-close" aria-label="Close contents">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </header>
+    <div class="body">
+      <div>
+        <ul id="toc-list"></ul>
+        <p id="toc-empty" class="empty" style="color:var(--muted);font-size:14px;">No table of contents for this file.</p>
+      </div>
+      <div>
+        <div class="toc-section-title">Bookmarks</div>
+        <ul id="bookmark-list"><li class="empty">No bookmarks yet.</li></ul>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ SETTINGS DRAWER ============ -->
+  <aside id="settings" class="drawer" aria-label="Display settings" aria-hidden="true">
+    <header>
+      <h2>Display</h2>
+      <button class="icon-btn" id="settings-close" aria-label="Close settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </header>
+    <div class="body">
+      <div class="field">
+        <label class="title" for="set-font">Font family</label>
+        <select id="set-font">
+          <option value="serif">Serif — Lora</option>
+          <option value="sans">Sans-serif — Inter</option>
+          <option value="mono">Monospace — JetBrains Mono</option>
+          <option value="humanist">Humanist — Literata</option>
+          <option value="dyslexia">Dyslexia-friendly — OpenDyslexic</option>
+        </select>
+      </div>
+
+      <div class="field">
+        <div class="row-val"><label class="title" for="set-size">Font size</label><span class="val" id="size-val">20px</span></div>
+        <input type="range" id="set-size" min="14" max="36" step="1" value="20" />
+      </div>
+
+      <div class="field">
+        <div class="row-val"><label class="title" for="set-line">Line height</label><span class="val" id="line-val">1.6</span></div>
+        <input type="range" id="set-line" min="1.2" max="2.2" step="0.1" value="1.6" />
+      </div>
+
+      <div class="field">
+        <label class="title">Margins</label>
+        <div class="seg" id="set-margin" role="group" aria-label="Margins">
+          <button data-margin="narrow">Narrow</button>
+          <button data-margin="medium" aria-pressed="true">Medium</button>
+          <button data-margin="wide">Wide</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="title">Text alignment</label>
+        <div class="seg" id="set-align" role="group" aria-label="Text alignment">
+          <button data-align="left" aria-pressed="true">Left</button>
+          <button data-align="justify">Justified</button>
+        </div>
+      </div>
+
+      <div class="field">
+        <label class="title">Page layout</label>
+        <div class="seg" id="set-columns" role="group" aria-label="Page layout">
+          <button data-columns="single" aria-pressed="true">Single</button>
+          <button data-columns="double">Double</button>
+        </div>
+        <p style="margin:0;font-size:13px;color:var(--muted);line-height:1.4;">Double shows two pages side by side — handy for spreads where a photo or graphic spans both pages.</p>
+      </div>
+
+      <div class="field">
+        <label class="title">PDF sharpness</label>
+        <div class="seg" id="set-quality" role="group" aria-label="PDF render sharpness">
+          <button data-quality="1.5">Standard</button>
+          <button data-quality="2" aria-pressed="true">High</button>
+          <button data-quality="3">Ultra</button>
+        </div>
+        <p style="margin:0;font-size:13px;color:var(--muted);line-height:1.4;">Higher = crisper PDF text on the Quest panel (uses more memory). EPUB text is always sharp.</p>
+      </div>
+
+      <div class="field">
+        <label class="title">Colour theme</label>
+        <div class="theme-grid" id="set-theme" role="group" aria-label="Colour theme">
+          <button class="theme-swatch" data-theme="light"  style="background:#ffffff;color:#1a1a1a;"><span class="dot" style="background:#1a1a1a;"></span>Light</button>
+          <button class="theme-swatch" data-theme="sepia"  style="background:#f4ecd8;color:#5b4636;"><span class="dot" style="background:#5b4636;"></span>Sepia</button>
+          <button class="theme-swatch" data-theme="dark" aria-pressed="true" style="background:#15171a;color:#cdd2d8;"><span class="dot" style="background:#cdd2d8;"></span>Dark</button>
+          <button class="theme-swatch" data-theme="amoled" style="background:#000;color:#d8d8d2;"><span class="dot" style="background:#d8d8d2;"></span>Amoled</button>
+          <button class="theme-swatch" data-theme="custom" style="background:linear-gradient(135deg,#101418 50%,#e8e8e8 50%);color:#9aa;"><span class="dot" style="background:var(--accent);"></span>Custom</button>
+        </div>
+        <div class="custom-colors" id="custom-colors">
+          <label>Background<input type="color" id="custom-bg" value="#101418" /></label>
+          <label>Text<input type="color" id="custom-text" value="#e8e8e8" /></label>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============ LOADING ============ -->
+  <div id="loading"><div class="spinner"></div><div class="label">Opening book…</div></div>
+
+  <!-- ============ ERROR ============ -->
+  <div id="error" role="alert">
+    <button class="close" id="error-close" aria-label="Dismiss">×</button>
+    <div class="title"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#e0584f" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg><span id="error-title">Couldn't open file</span></div>
+    <div class="msg" id="error-msg"></div>
+  </div>
+
+</div>
+
+<!-- ===================== LIBRARIES (CDN) ===================== -->
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<script>
+"use strict";
+(function () {
+  /* ===================================================================
+     IN-MEMORY STATE  (no localStorage — blocked in Quest browser sandbox)
+     =================================================================== */
+  const AppState = {
+    format: null,            // 'epub' | 'pdf'
+    book: null,              // epub.js Book
+    rendition: null,         // epub.js Rendition
+    locationsReady: false,
+    pdfDoc: null,
+    pdfPage: 1,
+    pdfTotal: 0,
+    pdfRendering: false,
+    pdfPendingPage: null,
+    bookTitle: '',
+    bookmarks: [],           // {label, type, cfi?|page?}
+    toolbarTimer: null,
+    settings: {
+      font: 'serif', size: 20, line: 1.6, margin: 'medium',
+      align: 'left', theme: 'dark', customBg: '#101418', customText: '#e8e8e8',
+      quality: 2,        // PDF render-resolution multiplier (sharpness): 1.5 / 2 / 3
+      columns: 'single'  // 'single' | 'double' (two-page spread)
+    }
+  };
+
+  const FONT_STACKS = {
+    serif:    "'Lora', Georgia, 'Times New Roman', serif",
+    sans:     "'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif",
+    mono:     "'JetBrains Mono', ui-monospace, 'Courier New', monospace",
+    humanist: "'Literata', Georgia, serif",
+    dyslexia: "'OpenDyslexic', 'Comic Sans MS', 'Trebuchet MS', sans-serif"
+  };
+  const MARGIN_MAP = { narrow: '4%', medium: '9%', wide: '15%' };
+
+  // pdf.js worker
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+
+  /* ===================================================================
+     SHORTHANDS
+     =================================================================== */
+  const $ = (sel) => document.querySelector(sel);
+  const body = document.body;
+  const els = {
+    welcome: $('#welcome'), dropzone: $('#dropzone'), fileInput: $('#file-input'),
+    reader: $('#reader'), epubArea: $('#epub-area'), pdfArea: $('#pdf-area'),
+    pdfCanvas: $('#pdf-canvas'),
+    toolbar: $('#toolbar'), bookTitle: $('#book-title'),
+    progressText: $('#progress-text'), progressBar: $('#progress-bar'),
+    scrim: $('#scrim'), settings: $('#settings'), toc: $('#toc'),
+    tocList: $('#toc-list'), tocEmpty: $('#toc-empty'), bookmarkList: $('#bookmark-list'),
+    loading: $('#loading'), loadingLabel: $('#loading .label'),
+    error: $('#error'), errorTitle: $('#error-title'), errorMsg: $('#error-msg'),
+    btnFullscreen: $('#btn-fullscreen'), btnTheme: $('#btn-theme'),
+    zonePrev: $('#zone-prev'), zoneNext: $('#zone-next'), zoneCenter: $('#zone-center')
+  };
+
+  /* ===================================================================
+     ERROR + LOADING
+     =================================================================== */
+  let errorTimer = null;
+  function showError(title, msg) {
+    els.errorTitle.textContent = title;
+    els.errorMsg.textContent = msg;
+    els.error.classList.add('show');
+    clearTimeout(errorTimer);
+    errorTimer = setTimeout(() => els.error.classList.remove('show'), 9000);
+  }
+  function hideError() { els.error.classList.remove('show'); }
+  function showLoading(label) { els.loadingLabel.textContent = label || 'Opening book…'; els.loading.classList.add('show'); }
+  function hideLoading() { els.loading.classList.remove('show'); }
+
+  /* ===================================================================
+     THEME + TYPOGRAPHY
+     =================================================================== */
+  // dark-ish themes drive the moon/sun quick-toggle icon + PDF invert
+  const DARK_THEMES = ['dark', 'amoled'];
+
+  function applyUiTheme() {
+    const s = AppState.settings;
+    body.dataset.theme = s.theme;
+    document.documentElement.style.setProperty('--custom-bg', s.customBg);
+    document.documentElement.style.setProperty('--custom-text', s.customText);
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', getComputedStyle(body).backgroundColor);
+    // reflect custom-colour picker visibility
+    $('#custom-colors').classList.toggle('show', s.theme === 'custom');
+    // sync quick-toggle icon: show sun when on a dark theme (click → go light)
+    const isDark = DARK_THEMES.includes(s.theme);
+    $('#icon-sun').style.display = isDark ? 'block' : 'none';
+    $('#icon-moon').style.display = isDark ? 'none' : 'block';
+    // sync settings grid selection
+    const grid = $('#set-theme');
+    if (grid) grid.querySelectorAll('button').forEach((b) =>
+      b.setAttribute('aria-pressed', String(b.dataset.theme === s.theme)));
+  }
+
+  // Central theme setter used by the grid, quick-toggle and init.
+  function setTheme(name) {
+    AppState.settings.theme = name;
+    applyUiTheme();
+    applyReaderTypography();
+  }
+
+  // One-tap light/dark switch available in both EPUB and PDF.
+  // Remembers the last light and last dark choice so toggling is reversible.
+  let lastLightTheme = 'light', lastDarkTheme = 'dark';
+  function quickToggleTheme() {
+    const cur = AppState.settings.theme;
+    if (DARK_THEMES.includes(cur)) { lastDarkTheme = cur; setTheme(lastLightTheme); }
+    else { if (cur !== 'custom') lastLightTheme = cur; setTheme(lastDarkTheme); }
+  }
+
+  // resolve the active reading bg/text colours (handles 'custom')
+  function readingColours() {
+    const cs = getComputedStyle(body);
+    return { bg: cs.getPropertyValue('--bg').trim(), text: cs.getPropertyValue('--text').trim() };
+  }
+
+  function applyReaderTypography() {
+    const s = AppState.settings;
+    const root = document.documentElement.style;
+    root.setProperty('--reader-font', FONT_STACKS[s.font]);
+    root.setProperty('--reader-size', s.size + 'px');
+    root.setProperty('--reader-line', s.line);
+    root.setProperty('--reader-pad', MARGIN_MAP[s.margin]);
+    root.setProperty('--reader-align', s.align);
+    if (AppState.format === 'epub') {
+      applyEpubTheme();
+      // a margin change resizes the reading column → epub.js must re-measure
+      if (AppState._epubPad !== s.margin && AppState.rendition) {
+        AppState._epubPad = s.margin;
+        requestAnimationFrame(() => { try { AppState.rendition.resize(); } catch (e) {} });
+      }
+    }
+  }
+
+  function applyEpubTheme() {
+    const r = AppState.rendition; if (!r) return;
+    const s = AppState.settings;
+    const c = readingColours();
+    r.themes.override('color', c.text, true);
+    r.themes.override('background', c.bg, true);
+    // Full default theme covers body + common elements
+    r.themes.default({
+      'html, body': {
+        'background': c.bg + ' !important',
+        'color': c.text + ' !important',
+        'font-family': FONT_STACKS[s.font] + ' !important',
+        'line-height': s.line + ' !important',
+        'text-align': s.align + ' !important',
+        'margin': '0 !important', 'padding': '0 !important',
+        '-webkit-hyphens': 'auto', 'hyphens': 'auto'
+      },
+      'p, li, div, span': {
+        'font-family': FONT_STACKS[s.font] + ' !important',
+        'line-height': s.line + ' !important',
+        'color': c.text + ' !important'
+      },
+      'p': { 'text-align': s.align + ' !important' },
+      'a': { 'color': 'var(--accent, #d9a05b) !important' },
+      'img, svg, image': { 'max-width': '100% !important', 'height': 'auto !important' },
+      'h1,h2,h3,h4,h5,h6': { 'color': c.text + ' !important', 'font-family': FONT_STACKS[s.font] + ' !important' }
+    });
+    r.themes.fontSize(s.size + 'px');
+  }
+
+  // Inject reading-font stylesheets into the EPUB iframe (fonts in the parent
+  // document are NOT shared with the sandboxed content document).
+  function injectEpubFonts(contents) {
+    try {
+      contents.addStylesheet('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,600;1,400&family=Inter:wght@400;600&family=Literata:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;700&display=swap');
+      contents.addStylesheet('https://cdn.jsdelivr.net/npm/@fontsource/opendyslexic@5.0.4/index.css');
+    } catch (e) { /* non-fatal: falls back to system fonts */ }
+  }
+
+  /* ===================================================================
+     FILE LOADING
+     =================================================================== */
+  function handleFiles(fileList) {
+    const file = fileList && fileList[0];
+    if (!file) return;
+    const name = (file.name || '').toLowerCase();
+    const ext = name.split('.').pop();
+
+    if (ext === 'epub') return openWithBuffer(file, 'epub');
+    if (ext === 'pdf') return openWithBuffer(file, 'pdf');
+    if (ext === 'mobi' || ext === 'azw3' || ext === 'azw') {
+      return showError('MOBI / AZW isn\'t supported yet',
+        'Please convert this book to EPUB using the free Calibre app, then open the .epub file here.');
+    }
+    // fall back to magic-byte sniffing
+    const reader = new FileReader();
+    reader.onload = () => {
+      const bytes = new Uint8Array(reader.result.slice(0, 4));
+      if (bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46) {
+        openWithBuffer(file, 'pdf');         // %PDF
+      } else if (bytes[0] === 0x50 && bytes[1] === 0x4B) {
+        openWithBuffer(file, 'epub');        // PK.. (zip / epub)
+      } else {
+        showError('Unrecognised file', 'VRReader supports EPUB and PDF files. This file doesn\'t look like either.');
+      }
+    };
+    reader.onerror = () => showError('Couldn\'t read file', 'The file could not be read from storage. Try choosing it again.');
+    reader.readAsArrayBuffer(file.slice(0, 4));
+  }
+
+  function openWithBuffer(file, format) {
+    hideError();
+    showLoading(format === 'pdf' ? 'Opening PDF…' : 'Opening EPUB…');
+    const reader = new FileReader();
+    reader.onload = () => {
+      const buffer = reader.result;
+      try {
+        if (format === 'pdf') openPdf(buffer, file.name);
+        else openEpub(buffer, file.name);
+      } catch (e) {
+        hideLoading();
+        console.error(e);
+        showError('Couldn\'t open this ' + format.toUpperCase(), friendlyMessage(format, e));
+      }
+    };
+    reader.onerror = () => { hideLoading(); showError('Couldn\'t read file', 'The file could not be read from storage. Try again.'); };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function friendlyMessage(format, e) {
+    const m = (e && e.message ? e.message : '').toLowerCase();
+    if (format === 'pdf' && (m.includes('password') || m.includes('encrypt')))
+      return 'This PDF appears to be password-protected. Remove the password (e.g. in your PDF app) and try again.';
+    if (format === 'epub')
+      return 'This EPUB may be corrupted or DRM-protected. DRM-protected books (e.g. from Adobe) can\'t be opened. Try a DRM-free copy or convert with Calibre.';
+    return 'The file may be corrupted or in an unexpected format. Try a different copy.';
+  }
+
+  function resetReaderDom() {
+    // destroy any previous book
+    try { if (AppState.rendition) AppState.rendition.destroy(); } catch (e) {}
+    try { if (AppState.book) AppState.book.destroy(); } catch (e) {}
+    AppState.rendition = null; AppState.book = null; AppState.pdfDoc = null;
+    AppState.locationsReady = false;
+    els.epubArea.innerHTML = '';
+    els.tocList.innerHTML = '';
+    AppState.bookmarks = [];
+    renderBookmarks();
+  }
+
+  /* ---------------------------- EPUB ---------------------------- */
+  function openEpub(buffer, filename) {
+    resetReaderDom();
+    AppState.format = 'epub';
+    els.pdfArea.style.display = 'none';
+    els.epubArea.style.display = 'block';
+
+    // inner stage so #epub-area padding (margins) shrinks the measured column
+    els.epubArea.innerHTML = '<div id="epub-stage"></div>';
+    const stage = els.epubArea.querySelector('#epub-stage');
+    AppState._epubPad = AppState.settings.margin;
+
+    const book = ePub(buffer);
+    AppState.book = book;
+
+    book.ready.then(() => {
+      // Make the reading panel visible BEFORE display() so epub.js measures the
+      // real container height (otherwise it renders into a 0-height iframe).
+      enterBookUi(filename);
+      return mountEpubRendition();
+    }).then(() => {
+      AppState.rendition.resize(); // re-measure now the panel is at full size
+      hideLoading();
+    }).catch((e) => {
+      hideLoading();
+      console.error(e);
+      showError('Couldn\'t open this EPUB', friendlyMessage('epub', e));
+    });
+
+    // metadata → title
+    book.loaded.metadata.then((meta) => {
+      AppState.bookTitle = (meta && meta.title) ? meta.title : prettyName(filename);
+      els.bookTitle.textContent = AppState.bookTitle;
+      document.title = AppState.bookTitle + ' — VRReader';
+    }).catch(() => {});
+
+    // table of contents
+    book.loaded.navigation.then((nav) => buildToc(nav.toc)).catch(() => buildToc([]));
+
+    // locations for accurate % progress (async, may take a moment on big books)
+    book.ready.then(() => book.locations.generate(1200)).then(() => {
+      AppState.locationsReady = true;
+      updateEpubProgress();
+    }).catch(() => {});
+  }
+
+  // Create the epub.js rendition with the current spread (single/double) and
+  // wire its hooks/events. Returns the display() promise. Used on open and when
+  // the page-layout toggle changes (the rendition is rebuilt to relayout).
+  function mountEpubRendition(target) {
+    const stage = els.epubArea.querySelector('#epub-stage');
+    const spread = AppState.settings.columns === 'double' ? 'always' : 'none';
+    const rendition = AppState.book.renderTo(stage, {
+      width: '100%', height: '100%', flow: 'paginated', spread: spread,
+      manager: 'default', allowScriptedContent: false
+    });
+    AppState.rendition = rendition;
+    rendition.hooks.content.register(injectEpubFonts);
+    rendition.on('relocated', (location) => {
+      AppState.currentLocation = location;
+      updateEpubProgress();
+    });
+    rendition.on('keyup', onKey);
+    applyEpubTheme();
+    return rendition.display(target);
+  }
+
+  function updateEpubProgress() {
+    const loc = AppState.currentLocation;
+    if (!loc) return;
+    let pct = null;
+    if (AppState.locationsReady && AppState.book && loc.start) {
+      pct = AppState.book.locations.percentageFromCfi(loc.start.cfi);
+    } else if (loc.start && typeof loc.start.percentage === 'number') {
+      pct = loc.start.percentage;
+    }
+    if (pct != null) {
+      const p = Math.round(pct * 100);
+      els.progressText.textContent = p + '%';
+      els.progressBar.style.width = p + '%';
+    } else if (loc.start && loc.start.displayed) {
+      els.progressText.textContent = loc.start.displayed.page + ' / ' + loc.start.displayed.total;
+    }
+  }
+
+  /* ---------------------------- PDF ---------------------------- */
+  function openPdf(buffer, filename) {
+    resetReaderDom();
+    AppState.format = 'pdf';
+    els.epubArea.style.display = 'none';
+    els.pdfArea.style.display = 'flex';
+
+    const task = pdfjsLib.getDocument({ data: buffer });
+    task.promise.then((pdf) => {
+      AppState.pdfDoc = pdf;
+      AppState.pdfTotal = pdf.numPages;
+      AppState.pdfPage = 1;
+      AppState.bookTitle = prettyName(filename);
+      els.bookTitle.textContent = AppState.bookTitle;
+      document.title = AppState.bookTitle + ' — VRReader';
+      buildToc([]); // PDFs: no reflow ToC (outline could be added later)
+      enterBookUi(filename);
+      hideLoading();
+      renderPdfPage(1);
+    }).catch((e) => {
+      hideLoading();
+      console.error(e);
+      const msg = (e && e.name === 'PasswordException')
+        ? 'This PDF is password-protected. Remove the password and try again.'
+        : friendlyMessage('pdf', e);
+      showError('Couldn\'t open this PDF', msg);
+    });
+  }
+
+  function renderPdfPage(num) {
+    if (!AppState.pdfDoc) return;
+    const dbl = AppState.settings.columns === 'double';
+    num = Math.min(Math.max(1, num), AppState.pdfTotal);
+    if (dbl && num % 2 === 0) num -= 1; // spreads are left-aligned to odd pages
+    if (AppState.pdfRendering) { AppState.pdfPendingPage = num; return; }
+    AppState.pdfRendering = true;
+    AppState.pdfPage = num;
+
+    const nums = dbl ? [num, num + 1].filter((n) => n <= AppState.pdfTotal) : [num];
+    Promise.all(nums.map((n) => AppState.pdfDoc.getPage(n))).then((pages) => {
+      const area = els.pdfArea.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      const u = pages.map((p) => p.getViewport({ scale: 1 }));
+      const totalW = u.reduce((s, v) => s + v.width, 0);
+      const maxH = Math.max.apply(null, u.map((v) => v.height));
+      // CSS size: fit the (combined) page(s) within the panel (contain)
+      const fitScale = Math.min(area.width / totalW, area.height / maxH) || 1;
+      // Backing resolution: fit × user quality (≥ device pixel ratio) for sharpness
+      let renderScale = fitScale * Math.max(AppState.settings.quality, dpr);
+      const MAX_DIM = 4096; // guard against oversized canvases (memory / browser max)
+      const over = Math.max(totalW, maxH) * renderScale / MAX_DIM;
+      if (over > 1) renderScale /= over;
+
+      const canvas = els.pdfCanvas;
+      const ctx = canvas.getContext('2d', { alpha: false });
+      canvas.width = Math.floor(totalW * renderScale);
+      canvas.height = Math.floor(maxH * renderScale);
+      canvas.style.width = Math.floor(totalW * fitScale) + 'px';
+      canvas.style.height = Math.floor(maxH * fitScale) + 'px';
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // render each page to its own offscreen canvas, then composite left→right
+      // (reliable for the two-page spread; avoids pdf.js shared-context quirks)
+      let xOffset = 0;
+      return pages.reduce((chain, p) => chain.then(() => {
+        const vp = p.getViewport({ scale: renderScale });
+        const off = document.createElement('canvas');
+        off.width = Math.floor(vp.width); off.height = Math.floor(vp.height);
+        return p.render({ canvasContext: off.getContext('2d', { alpha: false }), viewport: vp }).promise.then(() => {
+          ctx.drawImage(off, Math.floor(xOffset), 0);
+          xOffset += vp.width;
+        });
+      }), Promise.resolve());
+    }).then(() => {
+      AppState.pdfRendering = false;
+      updatePdfProgress();
+      if (AppState.pdfPendingPage != null) {
+        const next = AppState.pdfPendingPage; AppState.pdfPendingPage = null; renderPdfPage(next);
+      }
+    }).catch((e) => {
+      AppState.pdfRendering = false;
+      console.error(e);
+    });
+  }
+
+  function updatePdfProgress() {
+    const dbl = AppState.settings.columns === 'double';
+    const right = Math.min(AppState.pdfPage + (dbl ? 1 : 0), AppState.pdfTotal);
+    const label = (dbl && right > AppState.pdfPage) ? (AppState.pdfPage + '–' + right) : ('' + AppState.pdfPage);
+    els.progressText.textContent = label + ' / ' + AppState.pdfTotal;
+    els.progressBar.style.width = ((right / AppState.pdfTotal) * 100) + '%';
+  }
+
+  function prettyName(filename) {
+    return (filename || 'Document').replace(/\.[^.]+$/, '').replace(/[_]+/g, ' ');
+  }
+
+  /* ===================================================================
+     NAVIGATION
+     =================================================================== */
+  function nextPage() {
+    if (AppState.format === 'epub' && AppState.rendition) AppState.rendition.next();
+    else if (AppState.format === 'pdf') renderPdfPage(AppState.pdfPage + (AppState.settings.columns === 'double' ? 2 : 1));
+    pulseProgress();
+  }
+  function prevPage() {
+    if (AppState.format === 'epub' && AppState.rendition) AppState.rendition.prev();
+    else if (AppState.format === 'pdf') renderPdfPage(AppState.pdfPage - (AppState.settings.columns === 'double' ? 2 : 1));
+    pulseProgress();
+  }
+
+  // Switch between single page and two-page spread, live, for either format.
+  function setColumns(mode) {
+    if (AppState.settings.columns === mode) return;
+    AppState.settings.columns = mode;
+    if (AppState.format === 'epub' && AppState.book) {
+      // rebuild the rendition so epub.js relays out the spread, keeping position
+      const target = (AppState.currentLocation && AppState.currentLocation.start)
+        ? AppState.currentLocation.start.cfi : undefined;
+      try { if (AppState.rendition) AppState.rendition.destroy(); } catch (e) {}
+      els.epubArea.innerHTML = '<div id="epub-stage"></div>';
+      mountEpubRendition(target).then(() => AppState.rendition.resize()).catch((e) => console.error(e));
+    } else if (AppState.format === 'pdf' && AppState.pdfDoc) {
+      renderPdfPage(AppState.pdfPage);
+    }
+  }
+
+  function onKey(e) {
+    const k = e.key;
+    if (k === 'ArrowRight' || k === 'PageDown' || k === ' ' || k === 'Spacebar') { e.preventDefault && e.preventDefault(); nextPage(); }
+    else if (k === 'ArrowLeft' || k === 'PageUp') { e.preventDefault && e.preventDefault(); prevPage(); }
+    else if (k === 'f' || k === 'F') { toggleFocus(); }
+    else if (k === 'F11') { e.preventDefault && e.preventDefault(); toggleFullscreen(); }
+    else if (k === 'Escape') { closeDrawers(); }
+  }
+
+  /* ===================================================================
+     TABLE OF CONTENTS
+     =================================================================== */
+  function buildToc(toc) {
+    els.tocList.innerHTML = '';
+    if (!toc || !toc.length) { els.tocEmpty.style.display = 'block'; return; }
+    els.tocEmpty.style.display = 'none';
+    const frag = document.createDocumentFragment();
+    const add = (item, sub) => {
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.textContent = item.label ? item.label.trim() : '(untitled)';
+      a.href = '#'; if (sub) a.className = 'sub';
+      a.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        if (AppState.rendition) AppState.rendition.display(item.href);
+        closeDrawers();
+      });
+      li.appendChild(a); frag.appendChild(li);
+      if (item.subitems && item.subitems.length) item.subitems.forEach((s) => add(s, true));
+    };
+    toc.forEach((it) => add(it, false));
+    els.tocList.appendChild(frag);
+  }
+
+  /* ===================================================================
+     BOOKMARKS  (in-memory, session-persistent)
+     =================================================================== */
+  function addBookmark() {
+    if (AppState.format === 'epub') {
+      const loc = AppState.currentLocation;
+      if (!loc || !loc.start) return;
+      let label = '';
+      if (AppState.locationsReady)
+        label = Math.round(AppState.book.locations.percentageFromCfi(loc.start.cfi) * 100) + '%';
+      else label = 'Saved spot';
+      AppState.bookmarks.push({ type: 'epub', cfi: loc.start.cfi, label: 'Bookmark · ' + label });
+    } else if (AppState.format === 'pdf') {
+      AppState.bookmarks.push({ type: 'pdf', page: AppState.pdfPage, label: 'Bookmark · page ' + AppState.pdfPage });
+    }
+    renderBookmarks();
+    flashButton($('#btn-bookmark'));
+  }
+
+  function renderBookmarks() {
+    const list = els.bookmarkList;
+    list.innerHTML = '';
+    if (!AppState.bookmarks.length) {
+      list.innerHTML = '<li class="empty">No bookmarks yet.</li>'; return;
+    }
+    AppState.bookmarks.forEach((bm, i) => {
+      const li = document.createElement('li');
+      const go = document.createElement('button'); go.className = 'go'; go.textContent = bm.label;
+      go.addEventListener('click', () => {
+        if (bm.type === 'epub' && AppState.rendition) AppState.rendition.display(bm.cfi);
+        else if (bm.type === 'pdf') renderPdfPage(bm.page);
+        closeDrawers();
+      });
+      const del = document.createElement('button'); del.className = 'icon-btn';
+      del.setAttribute('aria-label', 'Remove bookmark');
+      del.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+      del.addEventListener('click', () => { AppState.bookmarks.splice(i, 1); renderBookmarks(); });
+      li.appendChild(go); li.appendChild(del); list.appendChild(li);
+    });
+  }
+
+  function flashButton(btn) {
+    if (!btn) return;
+    btn.style.color = '#1a1206'; btn.style.background = 'var(--accent)';
+    setTimeout(() => { btn.style.color = ''; btn.style.background = ''; }, 450);
+  }
+
+  /* ===================================================================
+     TOOLBAR AUTO-HIDE + FOCUS MODE
+     =================================================================== */
+  function showToolbar() {
+    if (!body.classList.contains('has-book')) return;
+    els.toolbar.classList.remove('hidden');
+    body.classList.remove('focus');
+    resetToolbarTimer();
+  }
+  function hideToolbar() { els.toolbar.classList.add('hidden'); clearTimeout(AppState.toolbarTimer); }
+  function resetToolbarTimer() {
+    clearTimeout(AppState.toolbarTimer);
+    // don't auto-hide while a drawer is open
+    if (els.settings.classList.contains('open') || els.toc.classList.contains('open')) return;
+    AppState.toolbarTimer = setTimeout(hideToolbar, 3000);
+  }
+  function pulseProgress() { showToolbar(); }
+
+  function toggleFocus() {
+    const focusing = !body.classList.contains('focus');
+    if (focusing) { body.classList.add('focus'); hideToolbar(); }
+    else { showToolbar(); }
+  }
+
+  /* ===================================================================
+     FULLSCREEN (real Fullscreen API — key for the Quest browser panel)
+     =================================================================== */
+  function fsElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+  function toggleFullscreen() {
+    const root = document.documentElement;
+    if (!fsElement()) {
+      const req = root.requestFullscreen || root.webkitRequestFullscreen;
+      if (req) { try { req.call(root); } catch (e) { /* not allowed */ } }
+    } else {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) { try { exit.call(document); } catch (e) {} }
+    }
+  }
+  function syncFullscreenBtn() {
+    const on = !!fsElement();
+    els.btnFullscreen.setAttribute('aria-pressed', String(on));
+    $('#icon-fs-enter').style.display = on ? 'none' : 'block';
+    $('#icon-fs-exit').style.display = on ? 'block' : 'none';
+    // PDF re-renders to the new viewport size after a fullscreen transition
+    if (AppState.format === 'pdf' && AppState.pdfDoc) setTimeout(() => renderPdfPage(AppState.pdfPage), 120);
+  }
+
+  /* ===================================================================
+     DRAWERS
+     =================================================================== */
+  function openDrawer(which) {
+    closeDrawers(true);
+    const d = which === 'settings' ? els.settings : els.toc;
+    d.classList.add('open'); d.setAttribute('aria-hidden', 'false');
+    els.scrim.classList.add('show');
+    showToolbar(); clearTimeout(AppState.toolbarTimer);
+  }
+  function closeDrawers(silent) {
+    els.settings.classList.remove('open'); els.settings.setAttribute('aria-hidden', 'true');
+    els.toc.classList.remove('open'); els.toc.setAttribute('aria-hidden', 'true');
+    els.scrim.classList.remove('show');
+    if (!silent) resetToolbarTimer();
+  }
+
+  /* ===================================================================
+     ENTER BOOK UI
+     =================================================================== */
+  function enterBookUi(filename) {
+    body.classList.add('has-book');
+    if (!AppState.bookTitle) { AppState.bookTitle = prettyName(filename); els.bookTitle.textContent = AppState.bookTitle; }
+    showToolbar(); // always show on first load
+  }
+
+  /* ===================================================================
+     SETTINGS WIRING
+     =================================================================== */
+  function setActive(group, attr, value) {
+    group.querySelectorAll('button').forEach((b) => {
+      b.setAttribute('aria-pressed', String(b.dataset[attr] === value));
+    });
+  }
+
+  function initSettings() {
+    // font
+    $('#set-font').addEventListener('change', (e) => {
+      AppState.settings.font = e.target.value; applyReaderTypography();
+    });
+    // size
+    const sizeEl = $('#set-size'), sizeVal = $('#size-val');
+    sizeEl.addEventListener('input', (e) => {
+      AppState.settings.size = +e.target.value; sizeVal.textContent = e.target.value + 'px';
+      applyReaderTypography();
+    });
+    // line
+    const lineEl = $('#set-line'), lineVal = $('#line-val');
+    lineEl.addEventListener('input', (e) => {
+      AppState.settings.line = +e.target.value; lineVal.textContent = (+e.target.value).toFixed(1);
+      applyReaderTypography();
+    });
+    // margin
+    const marginGroup = $('#set-margin');
+    marginGroup.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      AppState.settings.margin = b.dataset.margin; setActive(marginGroup, 'margin', b.dataset.margin);
+      applyReaderTypography();
+    });
+    // align
+    const alignGroup = $('#set-align');
+    alignGroup.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      AppState.settings.align = b.dataset.align; setActive(alignGroup, 'align', b.dataset.align);
+      applyReaderTypography();
+    });
+    // PDF render sharpness (re-renders the current page at a new backing resolution)
+    const qualityGroup = $('#set-quality');
+    qualityGroup.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      AppState.settings.quality = +b.dataset.quality; setActive(qualityGroup, 'quality', b.dataset.quality);
+      if (AppState.format === 'pdf' && AppState.pdfDoc) renderPdfPage(AppState.pdfPage);
+    });
+    // page layout: single page vs two-page spread
+    const columnsGroup = $('#set-columns');
+    columnsGroup.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      setActive(columnsGroup, 'columns', b.dataset.columns);
+      setColumns(b.dataset.columns);
+    });
+    // theme
+    const themeGroup = $('#set-theme');
+    themeGroup.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      setTheme(b.dataset.theme);
+    });
+    // custom colours
+    $('#custom-bg').addEventListener('input', (e) => {
+      AppState.settings.customBg = e.target.value; applyUiTheme(); applyReaderTypography();
+    });
+    $('#custom-text').addEventListener('input', (e) => {
+      AppState.settings.customText = e.target.value; applyUiTheme(); applyReaderTypography();
+    });
+  }
+
+  /* ===================================================================
+     EVENT WIRING
+     =================================================================== */
+  function initEvents() {
+    // file input + dropzone
+    els.fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+    $('#btn-open').addEventListener('click', () => els.fileInput.click());
+
+    ['dragenter', 'dragover'].forEach((ev) =>
+      els.dropzone.addEventListener(ev, (e) => { e.preventDefault(); els.dropzone.classList.add('drag'); }));
+    ['dragleave', 'drop'].forEach((ev) =>
+      els.dropzone.addEventListener(ev, (e) => { e.preventDefault(); els.dropzone.classList.remove('drag'); }));
+    els.dropzone.addEventListener('drop', (e) => {
+      if (e.dataTransfer && e.dataTransfer.files) handleFiles(e.dataTransfer.files);
+    });
+    // allow drop anywhere once a book is open (replace book)
+    window.addEventListener('dragover', (e) => e.preventDefault());
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      if (e.target.closest('#dropzone')) return;
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+    });
+
+    // toolbar buttons
+    $('#btn-toc').addEventListener('click', () =>
+      els.toc.classList.contains('open') ? closeDrawers() : openDrawer('toc'));
+    $('#btn-settings').addEventListener('click', () =>
+      els.settings.classList.contains('open') ? closeDrawers() : openDrawer('settings'));
+    $('#btn-bookmark').addEventListener('click', addBookmark);
+    els.btnTheme.addEventListener('click', quickToggleTheme);
+    els.btnFullscreen.addEventListener('click', toggleFullscreen);
+    document.addEventListener('fullscreenchange', syncFullscreenBtn);
+    document.addEventListener('webkitfullscreenchange', syncFullscreenBtn);
+    $('#toc-close').addEventListener('click', () => closeDrawers());
+    $('#settings-close').addEventListener('click', () => closeDrawers());
+    $('#scrim').addEventListener('click', () => closeDrawers());
+    $('#error-close').addEventListener('click', hideError);
+
+    // navigation zones
+    els.zonePrev.addEventListener('click', prevPage);
+    els.zoneNext.addEventListener('click', nextPage);
+    els.zoneCenter.addEventListener('click', () => {
+      // toggle UI chrome (focus mode)
+      if (els.settings.classList.contains('open') || els.toc.classList.contains('open')) { closeDrawers(); return; }
+      toggleFocus();
+    });
+
+    // keyboard (parent document)
+    window.addEventListener('keydown', (e) => {
+      if (!body.classList.contains('has-book')) return;
+      if (['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) return;
+      onKey(e);
+    });
+
+    // swipe gestures on the reader
+    let touchX = null, touchY = null;
+    els.reader.addEventListener('touchstart', (e) => {
+      if (e.touches.length !== 1) return;
+      touchX = e.touches[0].clientX; touchY = e.touches[0].clientY;
+    }, { passive: true });
+    els.reader.addEventListener('touchend', (e) => {
+      if (touchX == null) return;
+      const t = e.changedTouches[0];
+      const dx = t.clientX - touchX, dy = t.clientY - touchY;
+      if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5) { dx < 0 ? nextPage() : prevPage(); }
+      touchX = touchY = null;
+    }, { passive: true });
+
+    // any interaction resets the auto-hide timer
+    ['click', 'keydown', 'touchstart', 'mousemove'].forEach((ev) =>
+      window.addEventListener(ev, () => { if (!els.toolbar.classList.contains('hidden')) resetToolbarTimer(); }, { passive: true }));
+
+    // re-render PDF on resize (debounced)
+    let rt = null;
+    window.addEventListener('resize', () => {
+      clearTimeout(rt);
+      rt = setTimeout(() => { if (AppState.format === 'pdf' && AppState.pdfDoc) renderPdfPage(AppState.pdfPage); }, 150);
+    });
+
+    // service worker (best-effort; ignored on file://)
+    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+      window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    }
+  }
+
+  /* ===================================================================
+     INIT
+     =================================================================== */
+  function init() {
+    if (!window.ePub) console.warn('epub.js failed to load from CDN — EPUB reading unavailable.');
+    if (!window.pdfjsLib) console.warn('pdf.js failed to load from CDN — PDF reading unavailable.');
+    applyUiTheme();
+    applyReaderTypography();
+    initSettings();
+    initEvents();
+  }
+  init();
+})();
+</script>
+</body>
+</html>
