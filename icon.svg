@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#15171a"/>
+  <g transform="translate(256 256)">
+    <!-- open book -->
+    <path d="M0 -120C-44 -150 -110 -150 -150 -126V118C-110 96 -48 96 0 126C48 96 110 96 150 118V-126C110 -150 44 -150 0 -120Z"
+          fill="#1f242b" stroke="#d9a05b" stroke-width="14" stroke-linejoin="round"/>
+    <path d="M0 -120V126" stroke="#d9a05b" stroke-width="12"/>
+    <!-- text lines (left) -->
+    <g stroke="#d9a05b" stroke-width="9" stroke-linecap="round" opacity="0.7">
+      <line x1="-118" y1="-86" x2="-30" y2="-78"/>
+      <line x1="-118" y1="-50" x2="-30" y2="-42"/>
+      <line x1="-118" y1="-14" x2="-30" y2="-6"/>
+      <line x1="-118" y1="22" x2="-30" y2="30"/>
+      <line x1="-118" y1="58" x2="-50" y2="64"/>
+    </g>
+    <!-- text lines (right) -->
+    <g stroke="#d9a05b" stroke-width="9" stroke-linecap="round" opacity="0.7">
+      <line x1="30" y1="-78" x2="118" y2="-86"/>
+      <line x1="30" y1="-42" x2="118" y2="-50"/>
+      <line x1="30" y1="-6" x2="118" y2="-14"/>
+      <line x1="30" y1="30" x2="118" y2="22"/>
+      <line x1="30" y1="64" x2="100" y2="58"/>
+    </g>
+  </g>
+</svg>
