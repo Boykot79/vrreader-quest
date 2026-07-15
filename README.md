@@ -5,6 +5,16 @@ Progressive Web App, optimised for the Meta Quest 3 browser's floating panel.
 Open your own books from local storage and read edge-to-edge. Nothing is ever
 uploaded to a server.
 
+## In action
+
+Reading Moby Dick in the dark theme, straight from the headset:
+
+<img src="images/reading-dark.jpeg" alt="VRReader in the Meta Quest browser showing the Moby Dick title page in dark mode, with a Quest controller visible in the foreground" width="640">
+
+Full typography control: font family, size, line height, margins, alignment and single or double page layout:
+
+<img src="images/typography-panel.jpeg" alt="VRReader display settings panel with options for font family, font size, line height, margins, text alignment, page layout and PDF sharpness" width="640">
+
 ## Files
 
 | File | Purpose |
