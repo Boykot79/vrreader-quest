@@ -1,29 +1,29 @@
-# VRReader — Immersive E-Book Reader for the Meta Quest Browser
+# VRReader: Immersive E-Book Reader for the Meta Quest Browser
 
 A free, zero-install, zero-login **EPUB & PDF reader** built as a single-file
 Progressive Web App, optimised for the Meta Quest 3 browser's floating panel.
-Open your own books from local storage and read edge-to-edge — nothing is ever
+Open your own books from local storage and read edge-to-edge. Nothing is ever
 uploaded to a server.
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `vr-reader.html` | The entire app — HTML, CSS and vanilla JS in one file. No build step. |
+| `vr-reader.html` | The entire app: HTML, CSS and vanilla JS in one file. No build step. |
 | `index.html` | Redirect to `vr-reader.html` (so a bare folder URL works). |
-| `manifest.webmanifest` | PWA manifest — installable, `standalone`, themed. |
-| `sw.js` | Service worker — caches the app shell for offline use. |
-| `icon.svg`, `icon-192.png`, `icon-512.png`, `icon-512-maskable.png` | App icons. |
+| `manifest.webmanifest` | PWA manifest: installable, `standalone`, themed. |
+| `sw.js` | Service worker: caches the app shell for offline use. |
+| `icon.svg` | App icon (SVG, scalable, maskable). |
 
 ## Features
 
-- **Local file import** — drag & drop or file picker. EPUB and PDF. Processed
+- **Local file import**: drag & drop or file picker. EPUB and PDF. Processed
   entirely in-browser; no cloud, no backend, no account.
-- **EPUB** via [epub.js](https://github.com/futurepress/epub.js) — true reflow
+- **EPUB** via [epub.js](https://github.com/futurepress/epub.js): true reflow
   with full control of font, size, line height, margins, alignment and colours.
-- **PDF** via [pdf.js](https://mozilla.github.io/pdf.js/) — page-by-page canvas
+- **PDF** via [pdf.js](https://mozilla.github.io/pdf.js/): page-by-page canvas
   rendering with a dark-mode `invert` filter for comfortable reading.
-- **Real Fullscreen API** toolbar button (plus `F11`) — fills the Quest panel.
+- **Real Fullscreen API** toolbar button (plus `F11`) that fills the Quest panel.
 - **Quick light/dark toggle** in the toolbar, working in both formats.
 - **Typography panel**: 5 font families (Lora, Inter, JetBrains Mono, Literata,
   OpenDyslexic), font size 14–36px, line height 1.2–2.2, 3 margin widths,
@@ -32,11 +32,11 @@ uploaded to a server.
   background/text colour picker.
 - **Table of contents**, **in-memory bookmarks**, **progress indicator** and a
   thin chapter progress bar.
-- **Focus mode** — tap the centre of the page to hide all UI; tap again to
+- **Focus mode**: tap the centre of the page to hide all UI; tap again to
   restore. The toolbar also auto-hides after 3 seconds of inactivity.
-- **Navigation** — tap left/right edges, swipe, or use arrow keys / Space
+- **Navigation**: tap left/right edges, swipe, or use arrow keys / Space
   (Quest controller friendly). All touch targets are ≥ 44px.
-- **No `localStorage`** — all session state lives in an in-memory `AppState`
+- **No `localStorage`**: all session state lives in an in-memory `AppState`
   object (Quest browser sandbox blocks `localStorage`).
 
 ## Using it on the Quest 3
@@ -49,7 +49,7 @@ uploaded to a server.
    visit the service worker caches the shell, so it also opens offline.
 4. Tap the folder icon (or drag a file in) to open an EPUB or PDF and read.
 
-> MOBI/AZW3 isn't supported — convert to EPUB with the free
+> MOBI/AZW3 isn't supported. Convert to EPUB with the free
 > [Calibre](https://calibre-ebook.com/) app first.
 
 ## Architecture notes
