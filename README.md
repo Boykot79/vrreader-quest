@@ -15,6 +15,10 @@ Full typography control: font family, size, line height, margins, alignment and 
 
 <img src="images/typography-panel.jpeg" alt="VRReader display settings panel with options for font family, font size, line height, margins, text alignment, page layout and PDF sharpness" width="640">
 
+Five colour themes plus a custom colour picker, and adjustable PDF sharpness:
+
+<img src="images/colour-themes.jpeg" alt="VRReader display panel scrolled down to show page layout, PDF sharpness and the colour theme picker with Light, Sepia, Dark, Amoled and Custom options" width="640">
+
 ## Files
 
 | File | Purpose |
