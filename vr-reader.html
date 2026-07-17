@@ -601,6 +601,85 @@
   };
 
   /* ===================================================================
+     PERSISTENCE (IndexedDB)
+     localStorage is blocked in the Quest browser sandbox, but IndexedDB is
+     available — we use it to persist settings, per-book reading position and
+     bookmarks across sessions. Everything stays on-device. Every helper
+     resolves null/false on failure so the app degrades to in-memory only.
+     =================================================================== */
+  let dbPromise = null;
+  function openDb() {
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve) => {
+      if (!window.indexedDB) return resolve(null);
+      try {
+        const req = indexedDB.open('vrreader', 1);
+        req.onupgradeneeded = () => {
+          if (!req.result.objectStoreNames.contains('kv')) req.result.createObjectStore('kv');
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+        req.onblocked = () => resolve(null);
+      } catch (e) { resolve(null); }
+    });
+    return dbPromise;
+  }
+  function dbGet(key) {
+    return openDb().then((db) => new Promise((resolve) => {
+      if (!db) return resolve(null);
+      try {
+        const r = db.transaction('kv', 'readonly').objectStore('kv').get(key);
+        r.onsuccess = () => resolve(r.result || null);
+        r.onerror = () => resolve(null);
+      } catch (e) { resolve(null); }
+    }));
+  }
+  function dbSet(key, value) {
+    return openDb().then((db) => new Promise((resolve) => {
+      if (!db) return resolve(false);
+      try {
+        const r = db.transaction('kv', 'readwrite').objectStore('kv').put(value, key);
+        r.onsuccess = () => resolve(true);
+        r.onerror = () => resolve(false);
+      } catch (e) { resolve(false); }
+    }));
+  }
+
+  // per-book record: { title, cfi?|page?, bookmarks, updated }
+  let bookSaveTimer = null;
+  function saveBookState() {
+    if (!AppState.bookKey) return;
+    clearTimeout(bookSaveTimer);
+    bookSaveTimer = setTimeout(() => {
+      const rec = { title: AppState.bookTitle, bookmarks: AppState.bookmarks, updated: Date.now() };
+      if (AppState.format === 'epub' && AppState.currentLocation && AppState.currentLocation.start)
+        rec.cfi = AppState.currentLocation.start.cfi;
+      else if (AppState.format === 'pdf') rec.page = AppState.pdfPage;
+      dbSet(AppState.bookKey, rec);
+    }, 400);
+  }
+
+  // settings: saved on every change, restored at startup (guarded so the
+  // initial default render doesn't overwrite the stored record before load)
+  let settingsLoaded = false, settingsSaveTimer = null;
+  function saveSettings() {
+    if (!settingsLoaded) return;
+    clearTimeout(settingsSaveTimer);
+    settingsSaveTimer = setTimeout(() => dbSet('settings', Object.assign({}, AppState.settings)), 300);
+  }
+  function syncSettingsUi() {
+    const s = AppState.settings;
+    $('#set-font').value = s.font;
+    $('#set-size').value = s.size; $('#size-val').textContent = s.size + 'px';
+    $('#set-line').value = s.line; $('#line-val').textContent = (+s.line).toFixed(1);
+    setActive($('#set-margin'), 'margin', s.margin);
+    setActive($('#set-align'), 'align', s.align);
+    setActive($('#set-quality'), 'quality', String(s.quality));
+    setActive($('#set-columns'), 'columns', s.columns);
+    $('#custom-bg').value = s.customBg; $('#custom-text').value = s.customText;
+  }
+
+  /* ===================================================================
      ERROR + LOADING
      =================================================================== */
   let errorTimer = null;
@@ -638,6 +717,7 @@
     const grid = $('#set-theme');
     if (grid) grid.querySelectorAll('button').forEach((b) =>
       b.setAttribute('aria-pressed', String(b.dataset.theme === s.theme)));
+    saveSettings();
   }
 
   // Central theme setter used by the grid, quick-toggle and init.
@@ -670,6 +750,7 @@
     root.setProperty('--reader-line', s.line);
     root.setProperty('--reader-pad', MARGIN_MAP[s.margin]);
     root.setProperty('--reader-align', s.align);
+    saveSettings();
     if (AppState.format === 'epub') {
       applyEpubTheme();
       // a margin change resizes the reading column → epub.js must re-measure
@@ -756,14 +837,18 @@
     const reader = new FileReader();
     reader.onload = () => {
       const buffer = reader.result;
-      try {
-        if (format === 'pdf') openPdf(buffer, file.name);
-        else openEpub(buffer, file.name);
-      } catch (e) {
-        hideLoading();
-        console.error(e);
-        showError('Couldn\'t open this ' + format.toUpperCase(), friendlyMessage(format, e));
-      }
+      // stable per-book key (same file name+size = same saved state)
+      AppState.bookKey = 'book:' + (file.name || 'unnamed') + ':' + (file.size || 0);
+      dbGet(AppState.bookKey).then((saved) => {
+        try {
+          if (format === 'pdf') openPdf(buffer, file.name, saved);
+          else openEpub(buffer, file.name, saved);
+        } catch (e) {
+          hideLoading();
+          console.error(e);
+          showError('Couldn\'t open this ' + format.toUpperCase(), friendlyMessage(format, e));
+        }
+      });
     };
     reader.onerror = () => { hideLoading(); showError('Couldn\'t read file', 'The file could not be read from storage. Try again.'); };
     reader.readAsArrayBuffer(file);
@@ -791,8 +876,12 @@
   }
 
   /* ---------------------------- EPUB ---------------------------- */
-  function openEpub(buffer, filename) {
+  function openEpub(buffer, filename, saved) {
     resetReaderDom();
+    // restore persisted bookmarks for this book
+    if (saved && saved.bookmarks && saved.bookmarks.length) {
+      AppState.bookmarks = saved.bookmarks; renderBookmarks();
+    }
     AppState.format = 'epub';
     els.pdfArea.style.display = 'none';
     els.epubArea.style.display = 'block';
@@ -809,7 +898,8 @@
       // Make the reading panel visible BEFORE display() so epub.js measures the
       // real container height (otherwise it renders into a 0-height iframe).
       enterBookUi(filename);
-      return mountEpubRendition();
+      // resume at the saved position (CFI) when we have one
+      return mountEpubRendition(saved && saved.cfi ? saved.cfi : undefined);
     }).then(() => {
       AppState.rendition.resize(); // re-measure now the panel is at full size
       hideLoading();
@@ -851,6 +941,7 @@
     rendition.on('relocated', (location) => {
       AppState.currentLocation = location;
       updateEpubProgress();
+      saveBookState();
     });
     rendition.on('keyup', onKey);
     applyEpubTheme();
@@ -876,8 +967,12 @@
   }
 
   /* ---------------------------- PDF ---------------------------- */
-  function openPdf(buffer, filename) {
+  function openPdf(buffer, filename, saved) {
     resetReaderDom();
+    // restore persisted bookmarks for this book
+    if (saved && saved.bookmarks && saved.bookmarks.length) {
+      AppState.bookmarks = saved.bookmarks; renderBookmarks();
+    }
     AppState.format = 'pdf';
     els.epubArea.style.display = 'none';
     els.pdfArea.style.display = 'flex';
@@ -893,7 +988,8 @@
       buildToc([]); // PDFs: no reflow ToC (outline could be added later)
       enterBookUi(filename);
       hideLoading();
-      renderPdfPage(1);
+      // resume at the saved page when we have one
+      renderPdfPage((saved && saved.page) ? saved.page : 1);
     }).catch((e) => {
       hideLoading();
       console.error(e);
@@ -966,6 +1062,7 @@
     const label = (dbl && right > AppState.pdfPage) ? (AppState.pdfPage + '–' + right) : ('' + AppState.pdfPage);
     els.progressText.textContent = label + ' / ' + AppState.pdfTotal;
     els.progressBar.style.width = ((right / AppState.pdfTotal) * 100) + '%';
+    saveBookState();
   }
 
   function prettyName(filename) {
@@ -990,6 +1087,7 @@
   function setColumns(mode) {
     if (AppState.settings.columns === mode) return;
     AppState.settings.columns = mode;
+    saveSettings();
     if (AppState.format === 'epub' && AppState.book) {
       // rebuild the rendition so epub.js relays out the spread, keeping position
       const target = (AppState.currentLocation && AppState.currentLocation.start)
@@ -1052,6 +1150,7 @@
       AppState.bookmarks.push({ type: 'pdf', page: AppState.pdfPage, label: 'Bookmark · page ' + AppState.pdfPage });
     }
     renderBookmarks();
+    saveBookState();
     flashButton($('#btn-bookmark'));
   }
 
@@ -1072,7 +1171,7 @@
       const del = document.createElement('button'); del.className = 'icon-btn';
       del.setAttribute('aria-label', 'Remove bookmark');
       del.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
-      del.addEventListener('click', () => { AppState.bookmarks.splice(i, 1); renderBookmarks(); });
+      del.addEventListener('click', () => { AppState.bookmarks.splice(i, 1); renderBookmarks(); saveBookState(); });
       li.appendChild(go); li.appendChild(del); list.appendChild(li);
     });
   }
@@ -1203,6 +1302,7 @@
     qualityGroup.addEventListener('click', (e) => {
       const b = e.target.closest('button'); if (!b) return;
       AppState.settings.quality = +b.dataset.quality; setActive(qualityGroup, 'quality', b.dataset.quality);
+      saveSettings();
       if (AppState.format === 'pdf' && AppState.pdfDoc) renderPdfPage(AppState.pdfPage);
     });
     // page layout: single page vs two-page spread
@@ -1322,6 +1422,14 @@
     applyReaderTypography();
     initSettings();
     initEvents();
+    // restore persisted settings (async; re-applies once loaded)
+    dbGet('settings').then((s) => {
+      if (s && typeof s === 'object') Object.assign(AppState.settings, s);
+      settingsLoaded = true; // from now on changes are persisted
+      applyUiTheme();
+      applyReaderTypography();
+      syncSettingsUi();
+    });
   }
   init();
 })();
