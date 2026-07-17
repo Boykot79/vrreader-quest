@@ -44,14 +44,15 @@ Five colour themes plus a custom colour picker, and adjustable PDF sharpness:
   left/justified alignment.
 - **5 colour themes**: Light, Sepia, Dark, Amoled Black, and a Custom
   background/text colour picker.
-- **Table of contents**, **in-memory bookmarks**, **progress indicator** and a
+- **Table of contents**, **bookmarks**, **progress indicator** and a
   thin chapter progress bar.
 - **Focus mode**: tap the centre of the page to hide all UI; tap again to
   restore. The toolbar also auto-hides after 3 seconds of inactivity.
 - **Navigation**: tap left/right edges, swipe, or use arrow keys / Space
   (Quest controller friendly). All touch targets are ≥ 44px.
-- **No `localStorage`**: all session state lives in an in-memory `AppState`
-  object (Quest browser sandbox blocks `localStorage`).
+- **Remembers everything**: reading position, bookmarks and settings persist
+  between sessions via IndexedDB (the Quest browser sandbox blocks
+  `localStorage`), entirely on-device.
 
 ## Using it on the Quest 3
 
