@@ -1,6 +1,6 @@
 /* VRReader service worker — caches the app shell for offline use.
    Bump CACHE_VERSION on every change to the app shell so clients refresh. */
-const CACHE_VERSION = 'vrreader-v5';
+const CACHE_VERSION = 'vrreader-v6';
 const APP_SHELL = [
   './',
   './vr-reader.html',

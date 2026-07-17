@@ -1198,7 +1198,11 @@
     if (els.settings.classList.contains('open') || els.toc.classList.contains('open')) return;
     AppState.toolbarTimer = setTimeout(hideToolbar, 3000);
   }
-  function pulseProgress() { showToolbar(); }
+  function pulseProgress() {
+    // Page turns must never summon the toolbar over the text (it covers the
+    // top of the page for 3s). If it is already visible, just keep it alive.
+    if (!els.toolbar.classList.contains('hidden')) resetToolbarTimer();
+  }
 
   function toggleFocus() {
     const focusing = !body.classList.contains('focus');
